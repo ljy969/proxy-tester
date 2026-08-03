@@ -1,0 +1,1836 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>代理连通性测试</title>
+<script>
+  // 提前应用主题，避免页面加载闪烁（默认跟随系统）
+  (function () {
+    var stored = localStorage.getItem('theme-preference');
+    var theme = stored || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<style>
+  /* ===== 全局变量与基础样式 ===== */
+  :root {
+    --bg: #f5f7fa;
+    --card: #ffffff;
+    --primary: #4f6ef7;
+    --primary-hover: #3d5ae0;
+    --primary-light: #eef1fe;
+    --text: #2c3e50;
+    --text-light: #606266;
+    --text-muted: #909399;
+    --border: #e4e7ed;
+    --border-light: #ebeef5;
+    --success: #67c23a;
+    --warning: #e6a23c;
+    --danger: #f56c6c;
+    --info: #909399;
+    --shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    --shadow-hover: 0 4px 16px rgba(0, 0, 0, 0.1);
+    --radius: 8px;
+  }
+  [data-theme="dark"] {
+    --bg: #1a1d23;
+    --card: #242830;
+    --primary: #6a8dff;
+    --primary-hover: #5a7df0;
+    --primary-light: rgba(79, 110, 247, 0.15);
+    --text: #e4e7ed;
+    --text-light: #b0b6bf;
+    --text-muted: #7c8290;
+    --border: #3a3f4a;
+    --border-light: #31353f;
+    --success: #7ecf5a;
+    --warning: #e8b04a;
+    --danger: #f07070;
+    --info: #8a9099;
+    --shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+    --shadow-hover: 0 4px 16px rgba(0, 0, 0, 0.4);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { transition: background 0.3s, color 0.3s; }
+  html, body, .header, .card, .input, .textarea, .toast,
+  thead, tbody tr, .progress-wrap, .filter-btn, .badge, .latency {
+    transition: background-color 0.3s, color 0.3s, border-color 0.3s, box-shadow 0.3s;
+  }
+  html, body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font-family: inherit; cursor: pointer; border: none; background: none; }
+  input, textarea { font-family: inherit; }
+
+  /* ===== 顶部标题栏 ===== */
+  .header {
+    background: var(--card);
+    box-shadow: var(--shadow);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .header-logo {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, var(--primary), #6a8dff);
+    border-radius: var(--radius);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 20px;
+    box-shadow: 0 2px 8px rgba(79, 110, 247, 0.3);
+  }
+  .header-title { font-size: 18px; font-weight: 600; color: var(--text); }
+  .header-stats { display: flex; gap: 16px; }
+  .stat-item {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 4px 14px;
+    border-left: 1px solid var(--border-light);
+  }
+  .stat-item:first-child { border-left: none; }
+  .stat-value { font-size: 18px; font-weight: 600; color: var(--primary); }
+  .stat-value.alive { color: var(--success); }
+  .stat-value.timeout { color: var(--danger); }
+  .stat-label { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+  /* ===== 主容器 ===== */
+  .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+  /* ===== 卡片 ===== */
+  .card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+
+  /* ===== 导入面板 ===== */
+  .import-panel { transition: all 0.3s ease; }
+  .import-header {
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .import-header:hover { background: #fafbfc; }
+  .import-header-left { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .import-header-left .icon { color: var(--primary); }
+  .chevron { transition: transform 0.3s; color: var(--text-muted); }
+  .chevron.collapsed { transform: rotate(-90deg); }
+  .import-body { padding: 20px; }
+  .import-body.collapsed { display: none; }
+
+  /* ===== Tab 切换 ===== */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .tab {
+    padding: 8px 16px;
+    color: var(--text-light);
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    font-size: 13px;
+  }
+  .tab:hover { color: var(--primary); }
+  .tab.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+    font-weight: 500;
+  }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* ===== 输入框 ===== */
+  .input-wrap {
+    position: relative;
+    margin-bottom: 12px;
+  }
+  .input-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+  .input, .textarea {
+    width: 100%;
+    padding: 10px 12px 10px 38px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 13px;
+    color: var(--text);
+    transition: all 0.2s;
+    background: #fafbfc;
+  }
+  .textarea {
+    resize: vertical;
+    min-height: 120px;
+    font-family: "Consolas", "Monaco", monospace;
+    line-height: 1.6;
+  }
+  .input:focus, .textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(79, 110, 247, 0.1);
+  }
+  .input::placeholder, .textarea::placeholder { color: var(--text-muted); }
+
+  /* ===== 按钮 ===== */
+  .btn {
+    padding: 8px 16px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid transparent;
+  }
+  .btn-primary {
+    background: var(--primary);
+    color: #fff;
+  }
+  .btn-primary:hover {
+    background: var(--primary-hover);
+    box-shadow: 0 4px 12px rgba(79, 110, 247, 0.3);
+    transform: translateY(-1px);
+  }
+  .btn-secondary {
+    background: #fff;
+    color: var(--text-light);
+    border-color: var(--border);
+  }
+  .btn-secondary:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+    background: var(--primary-light);
+  }
+  .btn-danger {
+    background: #fff;
+    color: var(--danger);
+    border-color: #fbc4c4;
+  }
+  .btn-danger:hover { background: #fef0f0; }
+  .btn-success {
+    background: var(--success);
+    color: #fff;
+  }
+  .btn-success:hover { background: #5daf34; box-shadow: 0 4px 12px rgba(103, 194, 58, 0.3); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+  /* ===== 工具栏 ===== */
+  .toolbar {
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .filter-group { display: flex; gap: 6px; flex-wrap: wrap; }
+  .filter-btn {
+    padding: 5px 12px;
+    border-radius: 16px;
+    font-size: 12px;
+    color: var(--text-light);
+    background: #f0f2f5;
+    transition: all 0.2s;
+  }
+  .filter-btn:hover { background: var(--primary-light); color: var(--primary); }
+  .filter-btn.active {
+    background: var(--primary);
+    color: #fff;
+  }
+
+  /* ===== 进度条 ===== */
+  .progress-wrap {
+    padding: 12px 20px;
+    background: #fafbfc;
+    border-bottom: 1px solid var(--border-light);
+    display: none;
+  }
+  .progress-wrap.active { display: block; }
+  .progress-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-light);
+    margin-bottom: 6px;
+  }
+  .progress-bar {
+    height: 6px;
+    background: var(--border-light);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), #6a8dff);
+    border-radius: 3px;
+    transition: width 0.3s;
+    width: 0%;
+  }
+  .progress-fill.done { background: linear-gradient(90deg, var(--success), #85ce61); }
+
+  /* ===== 表格 ===== */
+  .table-wrap { overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  thead {
+    position: sticky;
+    top: 0;
+    background: #fafbfc;
+    z-index: 10;
+  }
+  th {
+    padding: 12px 14px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-light);
+    border-bottom: 2px solid var(--border-light);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+  }
+  th:hover { color: var(--primary); }
+  th .sort-icon {
+    margin-left: 4px;
+    color: var(--text-muted);
+    font-size: 10px;
+    opacity: 0.5;
+  }
+  th.sorted .sort-icon { opacity: 1; color: var(--primary); }
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-light);
+    vertical-align: middle;
+  }
+  tbody tr:nth-child(even) { background: #fafbfc; }
+  tbody tr:hover { background: var(--primary-light); }
+  tbody tr.selected { background: #ecf5ff; }
+  tbody tr.testing { animation: blink 1.2s infinite; }
+  @keyframes blink {
+    0%, 100% { background: #fff; }
+    50% { background: #fff8e1; }
+  }
+
+  .cell-name {
+    min-width: 140px;
+    max-width: 240px;
+  }
+  .name-input {
+    width: 100%;
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 4px 6px;
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 13px;
+  }
+  .name-input:hover { border-color: var(--border-light); }
+  .name-input:focus { outline: none; border-color: var(--primary); background: #fff; }
+
+  .cell-addr { font-family: "Consolas", monospace; font-size: 12px; color: var(--text-light); }
+  .cell-port { font-family: "Consolas", monospace; }
+  .cell-extra {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* ===== 徽章 ===== */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .badge-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .badge-testable { background: #f0f9eb; color: var(--success); }
+  .badge-testable .badge-dot { background: var(--success); }
+  .badge-untestable { background: #f4f4f5; color: var(--info); }
+  .badge-untestable .badge-dot { background: var(--info); }
+  .badge-testing { background: #fdf6ec; color: var(--warning); }
+  .badge-testing .badge-dot { background: var(--warning); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+  .badge-alive { background: #f0f9eb; color: var(--success); }
+  .badge-alive .badge-dot { background: var(--success); }
+  .badge-timeout { background: #fef0f0; color: var(--danger); }
+  .badge-timeout .badge-dot { background: var(--danger); }
+
+  /* ===== 延迟显示 ===== */
+  .latency {
+    font-family: "Consolas", "Monaco", monospace;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 12px;
+    cursor: pointer;
+    display: inline-block;
+    min-width: 70px;
+    text-align: center;
+    transition: all 0.3s;
+    animation: fadeIn 0.4s;
+  }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  .latency:hover { transform: scale(1.05); }
+  .latency-unit { font-size: 11px; font-weight: 400; opacity: 0.7; margin-left: 2px; }
+  .latency-good { background: #e1f3d8; color: #5daf34; }
+  .latency-mid { background: #faecd8; color: #cf9236; }
+  .latency-bad { background: #fde2e2; color: #dd6161; }
+  .latency-fail { background: #f4f4f5; color: var(--info); }
+
+  /* ===== 协议标签 ===== */
+  .proto-tag {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-family: "Consolas", monospace;
+  }
+  .proto-vmess { background: #eef1fe; color: var(--primary); }
+  .proto-vless { background: #e1f3d8; color: var(--success); }
+  .proto-trojan { background: #fde2e2; color: var(--danger); }
+  .proto-ss { background: #faecd8; color: var(--warning); }
+  .proto-ssr { background: #fdf6ec; color: #b88230; }
+  .proto-socks5 { background: #ecf5ff; color: #409eff; }
+  .proto-http { background: #f4f4f5; color: var(--info); }
+
+  /* ===== 空状态 ===== */
+  .empty {
+    padding: 60px 20px;
+    text-align: center;
+    color: var(--text-muted);
+  }
+  .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
+
+  /* ===== 复选框 ===== */
+  .checkbox {
+    width: 16px; height: 16px;
+    cursor: pointer;
+    accent-color: var(--primary);
+  }
+
+  /* ===== Toast ===== */
+  .toast-wrap {
+    position: fixed;
+    top: 80px;
+    right: 24px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .toast {
+    background: #fff;
+    border-radius: var(--radius);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    padding: 12px 18px;
+    border-left: 4px solid var(--primary);
+    font-size: 13px;
+    min-width: 220px;
+    animation: slideIn 0.3s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  @keyframes slideIn { from { transform: translateX(120%); opacity: 0; } to { transform: none; opacity: 1; } }
+  .toast.success { border-left-color: var(--success); }
+  .toast.error { border-left-color: var(--danger); }
+  .toast.warning { border-left-color: var(--warning); }
+
+  /* ===== 行操作按钮 ===== */
+  .action-btn {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--primary);
+    background: var(--primary-light);
+    transition: all 0.2s;
+  }
+  .action-btn:hover { background: var(--primary); color: #fff; }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ===== 主题切换按钮 ===== */
+  .theme-toggle {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    background: var(--primary-light);
+    border: 1px solid var(--border-light);
+    transition: all 0.3s;
+    flex-shrink: 0;
+  }
+  .theme-toggle:hover {
+    background: var(--primary);
+    color: #fff;
+    transform: rotate(20deg) scale(1.1);
+  }
+
+  /* ===== 深色模式额外适配 ===== */
+  [data-theme="dark"] .header { box-shadow: 0 2px 12px rgba(0,0,0,0.4); }
+  [data-theme="dark"] .input, [data-theme="dark"] .textarea { background: #1e2128; }
+  [data-theme="dark"] .input:focus, [data-theme="dark"] .textarea:focus { background: #242830; }
+  [data-theme="dark"] thead { background: #1e2128; }
+  [data-theme="dark"] tbody tr:nth-child(even) { background: #20242b; }
+  [data-theme="dark"] tbody tr:hover { background: rgba(79,110,247,0.12); }
+  [data-theme="dark"] tbody tr.selected { background: rgba(79,110,247,0.18); }
+  [data-theme="dark"] .progress-wrap { background: #1e2128; }
+  [data-theme="dark"] .toast { background: #2a2e36; color: var(--text); }
+  [data-theme="dark"] .filter-btn { background: #2a2e36; }
+  [data-theme="dark"] .btn-secondary { background: #2a2e36; }
+  [data-theme="dark"] .btn-danger { background: #2a2e36; }
+  [data-theme="dark"] .import-header:hover { background: #2a2e36; }
+  [data-theme="dark"] .badge-testable { background: rgba(103,194,58,0.15); }
+  [data-theme="dark"] .badge-untestable { background: rgba(144,147,153,0.15); }
+  [data-theme="dark"] .badge-testing { background: rgba(230,162,60,0.15); }
+  [data-theme="dark"] .badge-alive { background: rgba(103,194,58,0.15); }
+  [data-theme="dark"] .badge-timeout { background: rgba(245,108,108,0.15); }
+  [data-theme="dark"] .latency-good { background: rgba(103,194,58,0.18); }
+  [data-theme="dark"] .latency-mid { background: rgba(230,162,60,0.18); }
+  [data-theme="dark"] .latency-bad { background: rgba(245,108,108,0.18); }
+  [data-theme="dark"] .latency-fail { background: rgba(144,147,153,0.15); }
+  [data-theme="dark"] .proto-vmess { background: rgba(79,110,247,0.15); }
+  [data-theme="dark"] .proto-vless { background: rgba(103,194,58,0.15); }
+  [data-theme="dark"] .proto-trojan { background: rgba(245,108,108,0.15); }
+  [data-theme="dark"] .proto-ss { background: rgba(230,162,60,0.15); }
+  [data-theme="dark"] .proto-ssr { background: rgba(184,130,48,0.15); }
+  [data-theme="dark"] .proto-socks5 { background: rgba(64,158,255,0.15); }
+  [data-theme="dark"] .proto-http { background: rgba(144,147,153,0.15); }
+  [data-theme="dark"] tbody tr.testing { animation-name: blink-dark; }
+  @keyframes blink-dark {
+    0%, 100% { background: #242830; }
+    50% { background: #2e2a1a; }
+  }
+  [data-theme="dark"] .name-input:focus { background: #2a2e36; }
+
+  /* ===== 响应式 ===== */
+  @media (max-width: 768px) {
+    .header { padding: 12px 16px; flex-direction: column; gap: 10px; align-items: flex-start; }
+    .header-stats { width: 100%; justify-content: space-around; }
+    .stat-item { border-left: none; padding: 4px 8px; }
+    .container { padding: 12px; }
+    .toolbar { flex-direction: column; align-items: stretch; }
+    .filter-group { justify-content: center; }
+    th, td { padding: 8px 10px; font-size: 12px; }
+    .cell-name { min-width: 100px; max-width: 160px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== 顶部标题栏 ===== -->
+<div class="header">
+  <div class="header-left">
+    <div class="header-logo">⚡</div>
+    <div class="header-title">代理连通性测试</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:16px;">
+    <div class="header-stats">
+      <div class="stat-item">
+        <div class="stat-value" id="statTotal">0</div>
+        <div class="stat-label">总数</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="statTestable">0</div>
+        <div class="stat-label">可测数</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value alive" id="statAlive">0</div>
+        <div class="stat-label">存活数</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value timeout" id="statTimeout">0</div>
+        <div class="stat-label">超时数</div>
+      </div>
+    </div>
+    <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="切换深色/浅色模式">🌙</button>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- ===== 导入面板 ===== -->
+  <div class="card import-panel">
+    <div class="import-header" id="importHeader">
+      <div class="import-header-left">
+        <span class="icon">📥</span>
+        <span>节点导入</span>
+      </div>
+      <span class="chevron" id="chevron">▼</span>
+    </div>
+    <div class="import-body" id="importBody">
+      <div class="tabs">
+        <button class="tab active" data-tab="single">单节点链接</button>
+        <button class="tab" data-tab="subscription">订阅链接</button>
+        <button class="tab" data-tab="batch">批量粘贴</button>
+        <button class="tab" data-tab="clash">Clash YAML</button>
+      </div>
+
+      <!-- 单节点 -->
+      <div class="tab-content active" data-tab="single">
+        <div class="input-wrap">
+          <span class="input-icon">🔗</span>
+          <input type="text" class="input" id="singleInput"
+            placeholder="粘贴单个节点链接，如 vmess://、vless://、trojan://、ss://、ssr://、socks5://、http://">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="importSingle()">导入节点</button>
+        </div>
+      </div>
+
+      <!-- 订阅链接 -->
+      <div class="tab-content" data-tab="subscription">
+        <div class="input-wrap">
+          <span class="input-icon">🌐</span>
+          <input type="text" class="input" id="subInput"
+            placeholder="粘贴订阅链接 URL（https://...），将自动 fetch 拉取">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="importSubscription()">拉取订阅</button>
+          <span style="font-size:12px;color:var(--text-muted);">提示：若 CORS 失败请改用「批量粘贴」</span>
+        </div>
+      </div>
+
+      <!-- 批量粘贴 -->
+      <div class="tab-content" data-tab="batch">
+        <div class="input-wrap">
+          <span class="input-icon">📋</span>
+          <textarea class="textarea" id="batchInput"
+            placeholder="粘贴节点链接列表（每行一个）或 Base64 编码内容（自动解码）"></textarea>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="importBatch()">导入批量内容</button>
+        </div>
+      </div>
+
+      <!-- Clash YAML -->
+      <div class="tab-content" data-tab="clash">
+        <div class="input-wrap">
+          <span class="input-icon">📄</span>
+          <textarea class="textarea" id="clashInput"
+            placeholder="粘贴 Clash 订阅完整 YAML 内容，将自动提取 proxies 列表"></textarea>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="importClash()">提取 Clash 节点</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 节点表格卡片 ===== -->
+  <div class="card">
+    <!-- 工具栏 -->
+    <div class="toolbar">
+      <div class="filter-group">
+        <button class="filter-btn active" data-filter="all">全部</button>
+        <button class="filter-btn" data-filter="ws">仅 ws 传输</button>
+        <button class="filter-btn" data-filter="alive">存活</button>
+        <button class="filter-btn" data-filter="timeout">超时</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-success btn-sm" onclick="testAllTestable()">测试全部可测</button>
+        <button class="btn btn-primary btn-sm" onclick="testSelected()">测试选中</button>
+        <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--text-light);">
+          并发数
+          <input type="number" id="concurrencyInput" value="10" min="1" max="100"
+            style="width:56px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;text-align:center;">
+        </span>
+        <button class="btn btn-secondary btn-sm" onclick="copySelected()">复制选中</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteSelected()">删除选中</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportCSV()">导出 CSV</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportTxt()">导出 TXT</button>
+        <button class="btn btn-danger btn-sm" onclick="clearAll()">清空列表</button>
+      </div>
+    </div>
+
+    <!-- 进度条 -->
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-info">
+        <span id="progressText">准备测试...</span>
+        <span id="progressPercent">0%</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+    </div>
+
+    <!-- 表格 -->
+    <div class="table-wrap">
+      <table id="nodeTable">
+        <thead>
+          <tr>
+            <th style="width:36px;"><input type="checkbox" class="checkbox" id="selectAll" onchange="toggleSelectAll(this)"></th>
+            <th data-sort="index" style="width:50px;"># <span class="sort-icon"></span></th>
+            <th data-sort="name" class="cell-name">名称 <span class="sort-icon"></span></th>
+            <th data-sort="protocol" style="width:80px;">协议 <span class="sort-icon"></span></th>
+            <th data-sort="server">地址 <span class="sort-icon"></span></th>
+            <th data-sort="port" style="width:70px;">端口 <span class="sort-icon"></span></th>
+            <th data-sort="network" style="width:90px;">传输层 <span class="sort-icon"></span></th>
+            <th>额外信息</th>
+            <th data-sort="latency" style="width:130px;">延迟 / 状态 <span class="sort-icon"></span></th>
+            <th style="width:70px;">操作</th>
+          </tr>
+        </thead>
+        <tbody id="nodeTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- Toast 容器 -->
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+/* =========================================================
+ * 代理节点连通性测试工具
+ * 纯前端实现，原生 JavaScript，无外部依赖
+ * ========================================================= */
+
+/* ---------- 主题管理 ---------- */
+function getPreferredTheme() {
+  const stored = localStorage.getItem('theme-preference');
+  if (stored === 'dark' || stored === 'light') return stored;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = document.getElementById('themeToggle');
+  if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme');
+  const next = current === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('theme-preference', next);
+  applyTheme(next);
+}
+
+// 监听系统主题变化（仅在用户未手动设置时跟随）
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+  if (!localStorage.getItem('theme-preference')) {
+    applyTheme(e.matches ? 'dark' : 'light');
+  }
+});
+
+/* ---------- 全局状态 ---------- */
+const state = {
+  nodes: [],            // 所有节点数组
+  filter: 'all',        // 当前过滤器
+  sortKey: null,        // 排序字段
+  sortAsc: true,        // 升序/降序
+  testing: false,       // 是否正在测试
+};
+
+let nodeIdCounter = 0;  // 节点 ID 自增
+
+/* ---------- 工具函数 ---------- */
+
+// 安全 Base64 解码（兼容 URL-safe 与缺失 padding）
+function safeB64Decode(str) {
+  try {
+    str = str.trim().replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+    while (str.length % 4) str += '=';
+    return decodeURIComponent(escape(atob(str)));
+  } catch (e) {
+    return null;
+  }
+}
+
+// 是否为 Base64 字符串
+function looksLikeBase64(text) {
+  const t = text.trim().replace(/\s+/g, '');
+  if (!t) return false;
+  // 排除明显是 URL 协议
+  if (/^(vmess|vless|trojan|ss|ssr|socks5|https?):\/\//i.test(t)) return false;
+  return /^[A-Za-z0-9+/_=-]+$/.test(t) && t.length > 20;
+}
+
+// URI 查询参数解析
+function parseQuery(queryStr) {
+  const params = {};
+  if (!queryStr) return params;
+  queryStr.split('&').forEach(pair => {
+    const idx = pair.indexOf('=');
+    if (idx > -1) {
+      const k = pair.substring(0, idx);
+      const v = decodeURIComponent(pair.substring(idx + 1));
+      params[k] = v;
+    } else {
+      params[pair] = '';
+    }
+  });
+  return params;
+}
+
+// 显示 Toast
+function toast(msg, type = 'info', duration = 3000) {
+  const wrap = document.getElementById('toastWrap');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+  el.innerHTML = `<span>${icons[type] || ''}</span><span>${msg}</span>`;
+  wrap.appendChild(el);
+  setTimeout(() => {
+    el.style.transition = 'all 0.3s';
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(120%)';
+    setTimeout(() => el.remove(), 300);
+  }, duration);
+}
+
+/* =========================================================
+ * 协议解析器
+ * 每个解析器返回统一的节点对象：
+ *   { name, protocol, server, port, network, path, host, tls,
+ *     security, uuid, password, extra, raw }
+ * ========================================================= */
+
+// 统一字段提取器
+function makeNode(partial) {
+  return {
+    id: ++nodeIdCounter,
+    name: partial.name || `${partial.protocol}-${partial.server}:${partial.port}`,
+    protocol: partial.protocol,
+    server: partial.server,
+    port: partial.port,
+    network: partial.network || 'tcp',
+    path: partial.path || '',
+    host: partial.host || '',
+    tls: partial.tls || false,
+    security: partial.security || '',
+    uuid: partial.uuid || '',
+    password: partial.password || '',
+    extra: partial.extra || '',
+    raw: partial.raw || '',
+    status: 'idle',         // idle | testing | alive | timeout | untestable
+    latency: null,
+    selected: false,
+  };
+}
+
+// vmess:// 解析（Base64 JSON）
+function parseVmess(uri) {
+  try {
+    const b64 = uri.substring('vmess://'.length);
+    const json = safeB64Decode(b64);
+    if (!json) return null;
+    const obj = JSON.parse(json);
+    const net = (obj.net || 'tcp').toLowerCase();
+    const tls = (obj.tls || '') === 'tls' || obj.tls === true;
+    return makeNode({
+      name: obj.ps || obj.add,
+      protocol: 'vmess',
+      server: obj.add,
+      port: parseInt(obj.port) || 443,
+      network: net,
+      path: obj.path || '',
+      host: obj.host || '',
+      tls,
+      uuid: obj.id,
+      extra: `aid=${obj.aid || 0}${obj.scy ? ',scy=' + obj.scy : ''}${obj.sni ? ',sni=' + obj.sni : ''}`,
+      raw: uri,
+    });
+  } catch (e) { return null; }
+}
+
+// vless:// 解析（标准 URI）
+function parseVless(uri) {
+  try {
+    const u = new URL(uri);
+    const params = u.searchParams;
+    const net = (params.get('type') || 'tcp').toLowerCase();
+    const security = params.get('security') || 'none';
+    const tls = security === 'tls' || security === 'reality';
+    return makeNode({
+      name: decodeURIComponent(u.hash.substring(1)) || u.hostname,
+      protocol: 'vless',
+      server: u.hostname,
+      port: parseInt(u.port) || 443,
+      network: net,
+      path: params.get('path') ? decodeURIComponent(params.get('path')) : '',
+      host: params.get('host') || '',
+      tls,
+      security,
+      uuid: u.username,
+      extra: `flow=${params.get('flow') || ''}${params.get('sni') ? ',sni=' + params.get('sni') : ''}${params.get('serviceName') ? ',sn=' + params.get('serviceName') : ''}`,
+      raw: uri,
+    });
+  } catch (e) { return null; }
+}
+
+// trojan:// 解析
+function parseTrojan(uri) {
+  try {
+    const u = new URL(uri);
+    const params = u.searchParams;
+    const net = (params.get('type') || 'tcp').toLowerCase();
+    const security = params.get('security') || 'tls';
+    return makeNode({
+      name: decodeURIComponent(u.hash.substring(1)) || u.hostname,
+      protocol: 'trojan',
+      server: u.hostname,
+      port: parseInt(u.port) || 443,
+      network: net,
+      path: params.get('path') ? decodeURIComponent(params.get('path')) : '',
+      host: params.get('host') || '',
+      tls: true,
+      security,
+      password: decodeURIComponent(u.username),
+      extra: `${params.get('sni') ? 'sni=' + params.get('sni') : ''}${params.get('serviceName') ? ',sn=' + params.get('serviceName') : ''}`,
+      raw: uri,
+    });
+  } catch (e) { return null; }
+}
+
+// ss:// 解析（兼容多种格式）
+function parseShadowsocks(uri) {
+  try {
+    let body = uri.substring('ss://'.length);
+    let name = '';
+    const hashIdx = body.indexOf('#');
+    if (hashIdx > -1) {
+      name = decodeURIComponent(body.substring(hashIdx + 1));
+      body = body.substring(0, hashIdx);
+    }
+    // 移除查询参数
+    const qIdx = body.indexOf('?');
+    if (qIdx > -1) body = body.substring(0, qIdx);
+
+    let method = '', password = '', host = '', port = 0, net = 'tcp', path = '', host2 = '';
+    // 格式1: ss://base64(method:password)@host:port
+    if (body.includes('@')) {
+      const atIdx = body.lastIndexOf('@');
+      let userInfo = body.substring(0, atIdx);
+      const hostport = body.substring(atIdx + 1);
+      // userInfo 可能是 base64
+      if (!userInfo.includes(':')) {
+        const decoded = safeB64Decode(userInfo);
+        if (decoded && decoded.includes(':')) userInfo = decoded;
+      }
+      const [m, ...rest] = userInfo.split(':');
+      method = m; password = rest.join(':');
+      const [h, p] = hostport.split(':');
+      host = h; port = parseInt(p) || 443;
+    } else {
+      // 格式2: ss://base64(method:password@host:port)
+      const decoded = safeB64Decode(body);
+      if (!decoded || !decoded.includes('@')) return null;
+      const atIdx = decoded.lastIndexOf('@');
+      const userInfo = decoded.substring(0, atIdx);
+      const hostport = decoded.substring(atIdx + 1);
+      const [m, ...rest] = userInfo.split(':');
+      method = m; password = rest.join(':');
+      const [h, p] = hostport.split(':');
+      host = h; port = parseInt(p) || 443;
+    }
+    // ss 的 plugin 可能是 ws
+    try {
+      const u = new URL(uri);
+      const plugin = u.searchParams.get('plugin');
+      if (plugin && plugin.includes('ws')) {
+        net = 'ws';
+        const pathMatch = plugin.match(/path=([^;]+)/);
+        const hostMatch = plugin.match(/host=([^;]+)/);
+        if (pathMatch) path = decodeURIComponent(pathMatch[1]);
+        if (hostMatch) host2 = hostMatch[1];
+      }
+    } catch (e) {}
+    return makeNode({
+      name: name || `${host}:${port}`,
+      protocol: 'ss',
+      server: host,
+      port,
+      network: net,
+      path,
+      host: host2,
+      tls: false,
+      password,
+      extra: `method=${method}`,
+      raw: uri,
+    });
+  } catch (e) { return null; }
+}
+
+// ssr:// 解析
+function parseSSR(uri) {
+  try {
+    const b64 = uri.substring('ssr://'.length);
+    const decoded = safeB64Decode(b64);
+    if (!decoded) return null;
+    // 格式: host:port:protocol:method:obfs:base64pass/?params
+    const mainPart = decoded.split('/?')[0];
+    const paramsPart = decoded.split('/?')[1] || '';
+    const parts = mainPart.split(':');
+    if (parts.length < 6) return null;
+    const host = parts[0];
+    const port = parseInt(parts[1]);
+    const protocol = parts[2];
+    const method = parts[3];
+    const obfs = parts[4];
+    const password = safeB64Decode(parts[5]) || parts[5];
+    const params = parseQuery(paramsPart);
+    return makeNode({
+      name: params.remarks ? safeB64Decode(params.remarks) || params.remarks : `${host}:${port}`,
+      protocol: 'ssr',
+      server: host,
+      port,
+      network: 'tcp',
+      tls: false,
+      password,
+      extra: `proto=${protocol},method=${method},obfs=${obfs}`,
+      raw: uri,
+    });
+  } catch (e) { return null; }
+}
+
+// socks5:// / http:// 解析
+function parseGeneric(uri, proto) {
+  try {
+    const u = new URL(uri);
+    let name = decodeURIComponent(u.hash.substring(1)) || u.hostname;
+    const password = u.password ? decodeURIComponent(u.password) : '';
+    const username = u.username ? decodeURIComponent(u.username) : '';
+    return makeNode({
+      name,
+      protocol: proto,
+      server: u.hostname,
+      port: parseInt(u.port) || (proto === 'socks5' ? 1080 : 8080),
+      network: 'tcp',
+      tls: proto === 'https',
+      password,
+      extra: username ? `user=${username}` : '',
+      raw: uri,
+    });
+  } catch (e) { return null; }
+}
+
+// 根据协议分发解析
+function parseNodeLink(uri) {
+  uri = uri.trim();
+  if (/^vmess:\/\//i.test(uri)) return parseVmess(uri);
+  if (/^vless:\/\//i.test(uri)) return parseVless(uri);
+  if (/^trojan:\/\//i.test(uri)) return parseTrojan(uri);
+  if (/^ss:\/\//i.test(uri)) return parseSS(uri);
+  if (/^ssr:\/\//i.test(uri)) return parseSSR(uri);
+  if (/^socks5?:\/\//i.test(uri)) return parseGeneric(uri, 'socks5');
+  if (/^https?:\/\//i.test(uri) && !uri.includes('://') === false) {
+    // 仅当明显是代理 http 节点时
+    return parseGeneric(uri, uri.startsWith('https://') ? 'https' : 'http');
+  }
+  return null;
+}
+
+/* ---------- Clash YAML 解析 ---------- */
+
+// 解析单行 key: value
+function parseYamlLine(line, obj) {
+  const colonIdx = line.indexOf(':');
+  if (colonIdx === -1) return;
+  const key = line.substring(0, colonIdx).trim();
+  let value = line.substring(colonIdx + 1).trim();
+  if ((value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))) {
+    value = value.substring(1, value.length - 1);
+  }
+  if (value !== '') obj[key] = value;
+}
+
+// 解析 Clash YAML 中 proxies 段
+function parseClashYaml(text) {
+  const lines = text.split('\n');
+  const proxies = [];
+  let inProxies = false;
+  let proxiesIndent = -1;
+  let currentProxy = null;
+  let currentNestedKey = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim() || line.trim().startsWith('#')) continue;
+
+    const indent = line.length - line.trimStart().length;
+    const trimmed = line.trim();
+
+    if (!inProxies) {
+      if (/^proxies:\s*$/.test(trimmed)) {
+        inProxies = true;
+        proxiesIndent = indent;
+      }
+      continue;
+    }
+
+    // 离开 proxies 段（遇到同级或更高级的 key，且不是列表项）
+    if (indent <= proxiesIndent && !trimmed.startsWith('-')) {
+      if (currentProxy) { proxies.push(currentProxy); currentProxy = null; }
+      inProxies = false;
+      continue;
+    }
+
+    // 新代理项
+    if (trimmed.startsWith('- ')) {
+      if (currentProxy) proxies.push(currentProxy);
+      currentProxy = {};
+      currentNestedKey = null;
+      const rest = trimmed.substring(2);
+      parseYamlLine(rest, currentProxy);
+    } else if (currentProxy) {
+      // 判断是嵌套 key（如 ws-opts:）还是 kv
+      if (trimmed.endsWith(':') && !trimmed.includes(': ')) {
+        // 可能是嵌套
+        const key = trimmed.slice(0, -1).trim();
+        currentNestedKey = key;
+        currentProxy[key] = {};
+      } else if (currentNestedKey && indent > 0) {
+        // 检查缩进，决定归属
+        // 简单处理：若有未闭合嵌套，加入嵌套
+        parseYamlLine(trimmed, currentProxy[currentNestedKey]);
+        currentNestedKey = null;
+      } else {
+        parseYamlLine(trimmed, currentProxy);
+        currentNestedKey = null;
+      }
+    }
+  }
+  if (currentProxy) proxies.push(currentProxy);
+
+  // 转换为统一节点格式
+  return proxies.map(p => clashProxyToNode(p)).filter(Boolean);
+}
+
+// Clash proxy 对象转统一节点
+function clashProxyToNode(p) {
+  if (!p || !p.type) return null;
+  const type = p.type.toLowerCase();
+  const server = p.server;
+  const port = parseInt(p.port);
+  if (!server || !port) return null;
+
+  let network = 'tcp';
+  let path = '', host = '', tls = false, security = '';
+  let uuid = '', password = '', extra = '';
+
+  // 网络类型
+  if (p.network) network = p.network.toLowerCase();
+  if (network === 'ws' && p['ws-opts']) {
+    path = p['ws-opts'].path || '';
+    if (p['ws-opts'].headers && p['ws-opts'].headers.Host) {
+      host = p['ws-opts'].headers.Host;
+    }
+  }
+  if (network === 'grpc' && p['grpc-opts']) {
+    extra = 'serviceName=' + (p['grpc-opts']['grpc-service-name'] || p['grpc-opts'].serviceName || '');
+  }
+  if (network === 'h2' && p['h2-opts']) {
+    path = p['h2opts'].path || '';
+    host = (p['h2-opts'].host && p['h2-opts'].host[0]) || '';
+  }
+
+  // TLS 判断
+  if (p.tls === 'true' || p.tls === true) { tls = true; security = 'tls'; }
+  if (p.sni) extra = (extra ? extra + ',' : '') + 'sni=' + p.sni;
+  if (p['skip-cert-verify'] === 'true' || p['skip-cert-verify'] === true) {
+    extra = (extra ? extra + ',' : '') + 'skip-cert';
+  }
+
+  let protocol = type;
+  if (type === 'vmess') {
+    uuid = p.uuid || p.password || '';
+    if (p.alterId) extra = (extra ? extra + ',' : '') + 'aid=' + p.alterId;
+    if (p.cipher) extra = (extra ? extra + ',' : '') + 'scy=' + p.cipher;
+  } else if (type === 'vless') {
+    uuid = p.uuid || '';
+    if (p.flow) extra = (extra ? extra + ',' : '') + 'flow=' + p.flow;
+  } else if (type === 'trojan') {
+    password = p.password || '';
+  } else if (type === 'ss') {
+    password = p.password || '';
+    extra = 'method=' + (p.cipher || '');
+  } else if (type === 'ssr') {
+    password = p.password || '';
+    extra = `proto=${p.protocol||''},method=${p.cipher||''},obfs=${p.obfs||''}`;
+  } else if (type === 'socks5') {
+    password = p.password || '';
+    if (p.username) extra = 'user=' + p.username;
+  } else if (type === 'http') {
+    password = p.password || '';
+    if (p.username) extra = 'user=' + p.username;
+  } else {
+    return null;
+  }
+
+  return makeNode({
+    name: p.name,
+    protocol,
+    server,
+    port,
+    network,
+    path,
+    host,
+    tls,
+    security,
+    uuid,
+    password,
+    extra,
+    raw: JSON.stringify(p),
+  });
+}
+
+/* =========================================================
+ * 导入功能
+ * ========================================================= */
+
+function importSingle() {
+  const val = document.getElementById('singleInput').value.trim();
+  if (!val) { toast('请输入节点链接', 'warning'); return; }
+  const node = parseNodeLink(val);
+  if (!node) { toast('解析失败，请检查链接格式', 'error'); return; }
+  state.nodes.push(node);
+  renderTable();
+  updateStats();
+  document.getElementById('singleInput').value = '';
+  toast(`已导入：${node.name}`, 'success');
+}
+
+async function importSubscription() {
+  const url = document.getElementById('subInput').value.trim();
+  if (!url) { toast('请输入订阅链接', 'warning'); return; }
+  toast('正在拉取订阅...', 'info');
+
+  let text = null;
+
+  // 第一步：尝试直接 fetch
+  try {
+    const resp = await fetch(url, { mode: 'cors' });
+    if (resp.ok) text = await resp.text();
+  } catch (e) { /* CORS 被拦截，继续尝试代理 */ }
+
+  // 第二步：直接失败则依次尝试 CORS 代理
+  if (!text) {
+    const proxies = [
+      'https://corsproxy.io/?url=' + encodeURIComponent(url),
+      'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+      'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url),
+    ];
+    for (const proxyUrl of proxies) {
+      try {
+        const resp = await fetch(proxyUrl);
+        if (resp.ok) {
+          const t = await resp.text();
+          if (t && t.trim().length > 0) { text = t; break; }
+        }
+      } catch (e) { continue; }
+    }
+  }
+
+  if (!text) {
+    toast('拉取失败（所有代理均不可用），请手动复制内容到「批量粘贴」', 'error', 5000);
+    return;
+  }
+
+  const nodes = parseSubscriptionContent(text);
+  if (nodes.length === 0) {
+    toast('未解析到节点，请改用「批量粘贴」', 'warning');
+    return;
+  }
+  state.nodes.push(...nodes);
+  renderTable();
+  updateStats();
+  toast(`成功导入 ${nodes.length} 个节点`, 'success');
+}
+
+// 解析订阅内容（兼容 Base64 / 明文 / Clash YAML）
+function parseSubscriptionContent(text) {
+  text = text.trim();
+  // Clash YAML？
+  if (text.includes('proxies:') && text.includes('- name:')) {
+    return parseClashYaml(text);
+  }
+  // 尝试 Base64 解码
+  if (looksLikeBase64(text)) {
+    const decoded = safeB64Decode(text);
+    if (decoded) text = decoded;
+  }
+  // 按行解析节点链接
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const nodes = [];
+  for (const line of lines) {
+    const node = parseNodeLink(line);
+    if (node) nodes.push(node);
+  }
+  return nodes;
+}
+
+function importBatch() {
+  const text = document.getElementById('batchInput').value.trim();
+  if (!text) { toast('请粘贴内容', 'warning'); return; }
+  const nodes = parseSubscriptionContent(text);
+  if (nodes.length === 0) { toast('未解析到有效节点', 'error'); return; }
+  state.nodes.push(...nodes);
+  renderTable();
+  updateStats();
+  toast(`成功导入 ${nodes.length} 个节点`, 'success');
+}
+
+function importClash() {
+  const text = document.getElementById('clashInput').value.trim();
+  if (!text) { toast('请粘贴 Clash YAML', 'warning'); return; }
+  const nodes = parseClashYaml(text);
+  if (nodes.length === 0) { toast('未在 YAML 中找到 proxies', 'error'); return; }
+  state.nodes.push(...nodes);
+  renderTable();
+  updateStats();
+  toast(`成功提取 ${nodes.length} 个节点`, 'success');
+}
+
+function deleteSelected() {
+  const selected = state.nodes.filter(n => n.selected);
+  if (selected.length === 0) { toast('请先勾选要删除的节点', 'warning'); return; }
+  if (!confirm(`确定删除选中的 ${selected.length} 个节点？`)) return;
+  const selectedIds = new Set(selected.map(n => n.id));
+  state.nodes = state.nodes.filter(n => !selectedIds.has(n.id));
+  renderTable();
+  updateStats();
+  toast(`已删除 ${selected.length} 个节点`, 'success');
+}
+
+function clearAll() {
+  if (state.nodes.length === 0) return;
+  if (!confirm('确定清空所有节点？')) return;
+  state.nodes = [];
+  renderTable();
+  updateStats();
+  toast('已清空', 'info');
+}
+
+/* =========================================================
+ * 表格渲染
+ * ========================================================= */
+
+function renderTable() {
+  const tbody = document.getElementById('nodeTbody');
+  const visibleNodes = getFilteredNodes();
+
+  if (visibleNodes.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="10">
+          <div class="empty">
+            <div class="empty-icon">📭</div>
+            <div>${state.nodes.length === 0 ? '暂无节点，请从上方导入' : '当前筛选无匹配节点'}</div>
+          </div>
+        </td>
+      </tr>`;
+    return;
+  }
+
+  // 排序
+  const sorted = [...visibleNodes];
+  if (state.sortKey) {
+    sorted.sort((a, b) => {
+      let va = getSortValue(a, state.sortKey);
+      let vb = getSortValue(b, state.sortKey);
+      if (typeof va === 'number' && typeof vb === 'number') {
+        return state.sortAsc ? va - vb : vb - va;
+      }
+      va = String(va || ''); vb = String(vb || '');
+      return state.sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
+  }
+
+  tbody.innerHTML = sorted.map(node => renderRow(node)).join('');
+  // 绑定名称编辑
+  tbody.querySelectorAll('.name-input').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const id = parseInt(e.target.dataset.id);
+      const n = state.nodes.find(x => x.id === id);
+      if (n) { n.name = e.target.value; }
+    });
+  });
+  // 绑定复选框
+  tbody.querySelectorAll('.row-check').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      const id = parseInt(e.target.dataset.id);
+      const n = state.nodes.find(x => x.id === id);
+      if (n) { n.selected = e.target.checked; }
+    });
+  });
+}
+
+function renderRow(node) {
+  // 测试状态徽章
+  let statusBadge;
+  if (!isTestable(node)) {
+    statusBadge = `<span class="badge badge-untestable"><span class="badge-dot"></span>不可测试</span>`;
+  } else if (node.status === 'testing') {
+    statusBadge = `<span class="badge badge-testing"><span class="badge-dot"></span>测试中</span>`;
+  } else if (node.status === 'alive') {
+    const cls = latencyClass(node.latency);
+    statusBadge = `<span class="latency ${cls}" onclick="copyLatency(${node.id})" title="点击复制">${node.latency}<span class="latency-unit">ms</span></span>`;
+  } else if (node.status === 'timeout') {
+    statusBadge = `<span class="badge badge-timeout"><span class="badge-dot"></span>超时</span>`;
+  } else {
+    statusBadge = `<span class="badge badge-testable"><span class="badge-dot"></span>可测试</span>`;
+  }
+
+  const protoClass = `proto-${node.protocol}`;
+  const trClass = node.status === 'testing' ? 'testing' : (node.selected ? 'selected' : '');
+
+  return `
+    <tr class="${trClass}">
+      <td><input type="checkbox" class="checkbox row-check" data-id="${node.id}" ${node.selected ? 'checked' : ''}></td>
+      <td>${node.id}</td>
+      <td class="cell-name">
+        <input type="text" class="name-input" data-id="${node.id}" value="${escapeHtml(node.name)}">
+      </td>
+      <td><span class="proto-tag ${protoClass}">${node.protocol}</span></td>
+      <td class="cell-addr">${escapeHtml(node.server)}</td>
+      <td class="cell-port">${node.port}</td>
+      <td>${escapeHtml(node.network)}</td>
+      <td class="cell-extra" title="${escapeHtml(node.extra)}">${escapeHtml(node.extra)}</td>
+      <td>${statusBadge}</td>
+      <td>
+        <button class="action-btn" onclick="testSingle(${node.id})" ${!isTestable(node) || node.status === 'testing' ? 'disabled' : ''}>测试</button>
+      </td>
+    </tr>`;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function latencyClass(ms) {
+  if (ms == null) return 'latency-fail';
+  if (ms < 100) return 'latency-good';
+  if (ms < 300) return 'latency-mid';
+  return 'latency-bad';
+}
+
+function getSortValue(node, key) {
+  if (key === 'index') return node.id;
+  if (key === 'status') {
+    if (!isTestable(node)) return 0;
+    if (node.status === 'alive') return 1;
+    if (node.status === 'timeout') return 2;
+    return 3;
+  }
+  if (key === 'latency') {
+    // 存活节点按延迟值排序，超时排后面，未测试排最后
+    if (node.status === 'alive' && node.latency != null) return node.latency;
+    if (node.status === 'timeout') return 999999;
+    return 9999999;
+  }
+  if (key === 'port') return parseInt(node.port) || 0;
+  return node[key] || '';
+}
+
+/* ---------- 筛选 ---------- */
+function getFilteredNodes() {
+  switch (state.filter) {
+    case 'ws': return state.nodes.filter(n => {
+      const net = (n.network || '').toLowerCase();
+      return net === 'ws' || net === 'wss';
+    });
+    case 'alive': return state.nodes.filter(n => n.status === 'alive');
+    case 'timeout': return state.nodes.filter(n => n.status === 'timeout');
+    default: return state.nodes;
+  }
+}
+
+function isTestable(node) {
+  // 所有有 server + port 的节点均可探测
+  return !!(node.server && node.port);
+}
+
+/* ---------- 统计 ---------- */
+function updateStats() {
+  const total = state.nodes.length;
+  const testable = state.nodes.filter(isTestable).length;
+  const alive = state.nodes.filter(n => n.status === 'alive').length;
+  const timeout = state.nodes.filter(n => n.status === 'timeout').length;
+  document.getElementById('statTotal').textContent = total;
+  document.getElementById('statTestable').textContent = testable;
+  document.getElementById('statAlive').textContent = alive;
+  document.getElementById('statTimeout').textContent = timeout;
+}
+
+/* =========================================================
+ * WebSocket 连通性测试
+ * ========================================================= */
+
+
+// 根据节点构建探测 URL（兼容所有协议）
+function buildProbeUrl(node) {
+  if (!isTestable(node)) return null;
+  let scheme;
+  // HTTPS 页面只能用 wss；HTTP 页面按节点 TLS 决定
+  if (location.protocol === 'https:') {
+    scheme = 'wss';
+  } else {
+    scheme = node.tls ? 'wss' : 'ws';
+  }
+  const net = (node.network || '').toLowerCase();
+  if (net === 'ws' || net === 'wss') {
+    let path = node.path || '/';
+    if (!path.startsWith('/')) path = '/' + path;
+    return `${scheme}://${node.server}:${node.port}${path}`;
+  }
+  // 非 ws 节点：用 WebSocket 做 TCP/TLS 层探测
+  return `${scheme}://${node.server}:${node.port}/`;
+}
+
+// 测试单个节点（自动区分 ws 握手 / tcp 探测）
+function testNodeLatency(node, timeoutMs = 10000) {
+  return new Promise(resolve => {
+    const url = buildProbeUrl(node);
+    if (!url) {
+      resolve({ status: 'timeout', latency: null });
+      return;
+    }
+
+    const net = (node.network || '').toLowerCase();
+    const isWsNode = (net === 'ws' || net === 'wss');
+    const start = performance.now();
+    let settled = false;
+    let ws;
+
+    try {
+      ws = new WebSocket(url);
+    } catch (e) {
+      resolve({ status: 'timeout', latency: null });
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { ws.close(); } catch (e) {}
+      resolve({ status: 'timeout', latency: null });
+    }, timeoutMs);
+
+    ws.onopen = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const latency = performance.now() - start;
+      try { ws.close(); } catch (e) {}
+      resolve({ status: 'alive', latency: Math.round(latency) });
+    };
+
+    ws.onerror = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { ws.close(); } catch (e) {}
+      if (isWsNode) {
+        // ws 节点：握手失败 = 不可用
+        resolve({ status: 'timeout', latency: null });
+      } else {
+        // 非 ws 节点：收到 error 说明 TCP/TLS 层有响应（服务器拒绝了 WS 升级）
+        const latency = performance.now() - start;
+        resolve({ status: 'alive', latency: Math.round(latency) });
+      }
+    };
+
+    ws.onclose = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (isWsNode) {
+        resolve({ status: 'timeout', latency: null });
+      } else {
+        const latency = performance.now() - start;
+        resolve({ status: 'alive', latency: Math.round(latency) });
+      }
+    };
+  });
+}
+
+// 单节点测试
+async function testSingle(id) {
+  const node = state.nodes.find(n => n.id === id);
+  if (!node || !isTestable(node)) return;
+  if (state.testing) { toast('正在批量测试中，请稍候', 'warning'); return; }
+
+  node.status = 'testing';
+  renderTable();
+  const result = await testNodeLatency(node);
+  node.status = result.status;
+  node.latency = result.latency;
+  renderTable();
+  updateStats();
+}
+
+// 测试完成后自动按延迟排序
+function autoSortByLatency() {
+  state.sortKey = 'latency';
+  state.sortAsc = true;
+  // 更新表头排序指示
+  document.querySelectorAll('th').forEach(t => {
+    t.classList.remove('sorted');
+    const icon = t.querySelector('.sort-icon');
+    if (icon) icon.textContent = '';
+  });
+  const th = document.querySelector('th[data-sort="latency"]');
+  if (th) {
+    th.classList.add('sorted');
+    th.querySelector('.sort-icon').textContent = '▲';
+  }
+  renderTable();
+}
+
+// 并发测试核心执行器
+async function runConcurrentTest(nodes) {
+  const concurrency = Math.max(1, Math.min(100,
+    parseInt(document.getElementById('concurrencyInput').value) || 10
+  ));
+
+  const wrap = document.getElementById('progressWrap');
+  const fill = document.getElementById('progressFill');
+  const text = document.getElementById('progressText');
+  const pct = document.getElementById('progressPercent');
+  wrap.classList.add('active');
+  fill.classList.remove('done');
+  fill.style.width = '0%';
+
+  const total = nodes.length;
+  let completed = 0;
+
+  nodes.forEach(n => { n.status = 'testing'; n._done = false; });
+  renderTable();
+
+  async function worker() {
+    while (true) {
+      const node = nodes.find(n => n.status === 'testing' && !n._done);
+      if (!node) return;
+      node._done = true;
+
+      const result = await testNodeLatency(node);
+      node.status = result.status;
+      node.latency = result.latency;
+      completed++;
+
+      const pctVal = Math.round((completed / total) * 100);
+      fill.style.width = pctVal + '%';
+      pct.textContent = pctVal + '%';
+      text.textContent = `已完成 ${completed}/${total}（并发 ${concurrency}）`;
+      renderTable();
+      updateStats();
+    }
+  }
+
+  const workers = [];
+  for (let i = 0; i < Math.min(concurrency, total); i++) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+
+  nodes.forEach(n => { delete n._done; });
+
+  fill.style.width = '100%';
+  pct.textContent = '100%';
+  fill.classList.add('done');
+  text.textContent = `测试完成（共 ${total} 个节点，并发 ${concurrency}）`;
+
+  const alive = nodes.filter(n => n.status === 'alive').length;
+  toast(`测试完成，存活 ${alive}/${total}`, alive > 0 ? 'success' : 'warning', 4000);
+
+  setTimeout(() => wrap.classList.remove('active'), 3000);
+
+  // ★ 测试完成后自动按延迟排序
+  autoSortByLatency();
+}
+
+// 测试全部可测节点
+async function testAllTestable() {
+  const testable = state.nodes.filter(isTestable);
+  if (testable.length === 0) {
+    toast('没有可测试的节点', 'warning');
+    return;
+  }
+  if (state.testing) return;
+  state.testing = true;
+  await runConcurrentTest(testable);
+  state.testing = false;
+}
+
+// 测试选中节点
+async function testSelected() {
+  const selected = state.nodes.filter(n => n.selected && isTestable(n));
+  if (selected.length === 0) {
+    toast('请先勾选要测试的节点', 'warning');
+    return;
+  }
+  if (state.testing) return;
+  state.testing = true;
+  await runConcurrentTest(selected);
+  state.testing = false;
+}
+
+/* =========================================================
+ * 便捷功能
+ * ========================================================= */
+
+function copyLatency(id) {
+  const node = state.nodes.find(n => n.id === id);
+  if (!node || node.latency == null) return;
+  navigator.clipboard.writeText(String(node.latency)).then(() => {
+    toast(`已复制：${node.latency}ms`, 'success', 1500);
+  }).catch(() => {
+    toast('复制失败', 'error');
+  });
+}
+
+function toggleSelectAll(cb) {
+  const checked = cb.checked;
+  state.nodes.forEach(n => n.selected = checked);
+  renderTable();
+}
+
+function copySelected() {
+  const selected = state.nodes.filter(n => n.selected);
+  if (selected.length === 0) { toast('请先选中节点', 'warning'); return; }
+  const text = selected.map(n => n.raw || `${n.protocol}://${n.server}:${n.port}`).join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    toast(`已复制 ${selected.length} 个节点`, 'success');
+  }).catch(() => toast('复制失败', 'error'));
+}
+
+function exportCSV() {
+  if (state.nodes.length === 0) { toast('无节点可导出', 'warning'); return; }
+  const header = ['序号', '名称', '协议', '地址', '端口', '传输层', '额外信息', '延迟(ms)', '状态'];
+  const rows = state.nodes.map(n => [
+    n.id, n.name, n.protocol, n.server, n.port, n.network,
+    n.extra,
+    n.latency == null ? '' : n.latency,
+    !isTestable(n) ? '不可测试' : (n.status === 'alive' ? '存活' : n.status === 'timeout' ? '超时' : '未测试')
+  ]);
+  const csv = [header, ...rows].map(r =>
+    r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')
+  ).join('\n');
+  downloadFile('proxy-test-result.csv', '\ufeff' + csv, 'text/csv;charset=utf-8');
+  toast('已导出 CSV', 'success');
+}
+
+function exportTxt() {
+  if (state.nodes.length === 0) { toast('无节点可导出', 'warning'); return; }
+  const lines = state.nodes.map(n => {
+    const latency = n.latency == null ? '-' : n.latency + 'ms';
+    const status = !isTestable(n) ? '不可测试' : (n.status === 'alive' ? '存活' : n.status === 'timeout' ? '超时' : '未测试');
+    return `[${n.id}] ${n.name} | ${n.protocol} | ${n.server}:${n.port} | ${n.network} | ${latency} | ${status}`;
+  });
+  downloadFile('proxy-test-result.txt', lines.join('\n'), 'text/plain;charset=utf-8');
+  toast('已导出 TXT', 'success');
+}
+
+function downloadFile(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/* =========================================================
+ * UI 事件绑定
+ * ========================================================= */
+
+// 导入面板折叠
+document.getElementById('importHeader').addEventListener('click', () => {
+  const body = document.getElementById('importBody');
+  const chevron = document.getElementById('chevron');
+  body.classList.toggle('collapsed');
+  chevron.classList.toggle('collapsed');
+});
+
+// Tab 切换
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const target = tab.dataset.tab;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelector(`.tab-content[data-tab="${target}"]`).classList.add('active');
+  });
+});
+
+// 过滤按钮
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.filter = btn.dataset.filter;
+    renderTable();
+  });
+});
+
+// 表头排序
+document.querySelectorAll('th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.sort;
+    if (state.sortKey === key) {
+      state.sortAsc = !state.sortAsc;
+    } else {
+      state.sortKey = key;
+      state.sortAsc = true;
+    }
+    // 更新表头样式
+    document.querySelectorAll('th').forEach(t => {
+      t.classList.remove('sorted');
+      const icon = t.querySelector('.sort-icon');
+      if (icon) icon.textContent = '';
+    });
+    th.classList.add('sorted');
+    th.querySelector('.sort-icon').textContent = state.sortAsc ? '▲' : '▼';
+    renderTable();
+  });
+});
+
+// 初始化渲染
+renderTable();
+updateStats();
+applyTheme(getPreferredTheme());
+</script>
+</body>
+</html>

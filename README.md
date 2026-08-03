@@ -127,7 +127,7 @@ python -m http.server 8080
 
 | 浅色模式 | 深色模式 |
 |----------|----------|
-| ![light](docs/light.png) | ![dark](docs/dark.png) |
+| ![浅色](https://github.com/ljy969/proxy-tester/blob/main/proxy-tester/docs/screenshot-light.png) | ![深色](https://github.com/ljy969/proxy-tester/blob/main/proxy-tester/docs/screenshot-dark.png) |
 
 ---
 
@@ -197,22 +197,11 @@ python -m http.server 8080
 
 ## 截图
 
-### 主题预览
-
-| 浅色模式 | 深色模式 |
-|----------|----------|
-| ![浅色](docs/screenshot-light.png) | ![深色](docs/screenshot-dark.png) |
-
 ### 功能演示
 
-| 批量导入节点 | 并发测试中 |
-|:------------:|:----------:|
-| ![导入](docs/demo-import.png) | ![测试](docs/demo-testing.png) |
-
-| 测试结果排序 | 导出报告 |
-|:------------:|:--------:|
-| ![结果](docs/demo-result.png) |
-
+| 批量导入节点 | 并发测试中 | 测试结果排序 |
+|:------------:|:----------:|:------------:|
+| ![导入](https://raw.githubusercontent.com/ljy969/proxy-tester/main/proxy-tester/docs/demo-import.png) | ![测试](https://raw.githubusercontent.com/ljy969/proxy-tester/main/proxy-tester/docs/demo-testing.png) | ![结果](https://raw.githubusercontent.com/ljy969/proxy-tester/main/proxy-tester/docs/demo-result.png) |
 ---
 
 ## 配置说明

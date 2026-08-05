@@ -1230,63 +1230,164 @@ function importSingle() {
 async function importSubscription() {
   const url = document.getElementById('subInput').value.trim();
   if (!url) { toast('请输入订阅链接', 'warning'); return; }
-  toast('正在拉取订阅...', 'info');
 
-  let text = null;
+  // 显示进度条
+  const wrap = document.getElementById('progressWrap');
+  const fill = document.getElementById('progressFill');
+  const text = document.getElementById('progressText');
+  const pct = document.getElementById('progressPercent');
+  wrap.classList.add('active');
+  fill.classList.remove('done');
+  fill.style.width = '0%';
+  pct.textContent = '0%';
+  text.textContent = '正在拉取订阅...';
 
-  // 第一步：尝试直接 fetch
+  let text_content = null;
+  let fetchStep = '';
+
   try {
-    const resp = await fetch(url, { mode: 'cors' });
-    if (resp.ok) text = await resp.text();
-  } catch (e) { /* CORS 被拦截，继续尝试代理 */ }
+    // 第一步：尝试直接 fetch
+    fill.style.width = '10%';
+    pct.textContent = '10%';
+    text.textContent = '正在直连拉取订阅...';
+    try {
+      const resp = await fetch(url, { mode: 'cors' });
+      if (resp.ok) text_content = await resp.text();
+      if (text_content && text_content.trim().length > 0) {
+        fetchStep = '直连成功';
+      }
+    } catch (e) { /* CORS 被拦截，继续尝试代理 */ }
 
-  // 第二步：直接失败则依次尝试 CORS 代理
-  if (!text) {
-    const proxies = [
-      'https://corsproxy.io/?url=' + encodeURIComponent(url),
-      'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
-      'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url),
-    ];
-    for (const proxyUrl of proxies) {
-      try {
-        const resp = await fetch(proxyUrl);
-        if (resp.ok) {
-          const t = await resp.text();
-          if (t && t.trim().length > 0) { text = t; break; }
-        }
-      } catch (e) { continue; }
+    // 第二步：直接失败则依次尝试 CORS 代理
+    if (!text_content || !text_content.trim()) {
+      const proxies = [
+        { name: 'corsproxy.io', url: 'https://corsproxy.io/?url=' + encodeURIComponent(url) },
+        { name: 'allorigins.win', url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url) },
+        { name: 'codetabs.com', url: 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url) },
+      ];
+      for (let i = 0; i < proxies.length; i++) {
+        const proxyPct = Math.round(20 + (i / proxies.length) * 50);
+        fill.style.width = proxyPct + '%';
+        pct.textContent = proxyPct + '%';
+        text.textContent = `直连失败，正在通过 ${proxies[i].name} 拉取 (${i + 1}/${proxies.length})...`;
+        try {
+          const resp = await fetch(proxies[i].url);
+          if (resp.ok) {
+            const t = await resp.text();
+            if (t && t.trim().length > 0) {
+              text_content = t;
+              fetchStep = proxies[i].name + ' 成功';
+              break;
+            }
+          }
+        } catch (e) { continue; }
+      }
     }
-  }
 
-  if (!text) {
-    toast('拉取失败（所有代理均不可用），请手动复制内容到「批量粘贴」', 'error', 5000);
-    return;
-  }
+    if (!text_content || !text_content.trim()) {
+      fill.style.width = '100%';
+      pct.textContent = '失败';
+      fill.style.background = 'var(--danger)';
+      text.textContent = '拉取失败（所有方式均不可用）';
+      setTimeout(() => {
+        wrap.classList.remove('active');
+        fill.style.background = '';
+      }, 3000);
+      toast('拉取失败，请手动复制内容到「批量粘贴」', 'error', 5000);
+      return;
+    }
 
-  const nodes = parseSubscriptionContent(text);
-  if (nodes.length === 0) {
-    toast('未解析到节点，请改用「批量粘贴」', 'warning');
-    return;
+    // 第三步：解析内容
+    fill.style.width = '80%';
+    pct.textContent = '80%';
+    text.textContent = `拉取成功（${fetchStep}），正在解析节点...`;
+
+    // 清洗可能的 JSON 包装
+    let cleanText = text_content.trim();
+    if (cleanText.startsWith('{') && cleanText.endsWith('}')) {
+      try {
+        const json = JSON.parse(cleanText);
+        if (json.contents) cleanText = json.contents;
+        else if (json.data) cleanText = json.data;
+      } catch (e) {}
+    }
+
+    const nodes = parseSubscriptionContent(cleanText);
+
+    fill.style.width = '95%';
+    pct.textContent = '95%';
+    text.textContent = `解析完成，发现 ${nodes.length} 个节点，正在导入...`;
+
+    if (nodes.length === 0) {
+      fill.style.width = '100%';
+      pct.textContent = '无节点';
+      fill.style.background = 'var(--warning)';
+      text.textContent = '未解析到有效节点';
+      setTimeout(() => {
+        wrap.classList.remove('active');
+        fill.style.background = '';
+      }, 3000);
+      toast('未解析到节点，请改用「批量粘贴」', 'warning');
+      return;
+    }
+
+    state.nodes.push(...nodes);
+    renderTable();
+    updateStats();
+
+    fill.style.width = '100%';
+    pct.textContent = '100%';
+    fill.classList.add('done');
+    text.textContent = `✅ 成功导入 ${nodes.length} 个节点（${fetchStep}）`;
+
+    toast(`成功导入 ${nodes.length} 个节点`, 'success');
+    setTimeout(() => wrap.classList.remove('active'), 3000);
+
+  } catch (err) {
+    fill.style.width = '100%';
+    pct.textContent = '异常';
+    fill.style.background = 'var(--danger)';
+    text.textContent = '拉取过程发生异常：' + err.message;
+    setTimeout(() => {
+      wrap.classList.remove('active');
+      fill.style.background = '';
+    }, 4000);
+    toast('拉取异常：' + err.message, 'error', 5000);
   }
-  state.nodes.push(...nodes);
-  renderTable();
-  updateStats();
-  toast(`成功导入 ${nodes.length} 个节点`, 'success');
 }
 
 // 解析订阅内容（兼容 Base64 / 明文 / Clash YAML）
 function parseSubscriptionContent(text) {
   text = text.trim();
-  // Clash YAML？
+
+  // 1. Clash YAML 优先检测
   if (text.includes('proxies:') && text.includes('- name:')) {
     return parseClashYaml(text);
   }
-  // 尝试 Base64 解码
-  if (looksLikeBase64(text)) {
-    const decoded = safeB64Decode(text);
-    if (decoded) text = decoded;
+
+  // 2. 如果已经是明文节点链接（包含 ://），直接按行解析
+  if (/^(vmess|vless|trojan|ss|ssr|socks5|https?):\/\//im.test(text)) {
+    return parseLinesToNodes(text);
   }
-  // 按行解析节点链接
+
+  // 3. 否则无条件尝试 Base64 解码
+  const decoded = safeB64Decode(text);
+  if (decoded) {
+    if (/^(vmess|vless|trojan|ss|ssr|socks5|https?):\/\//im.test(decoded)) {
+      return parseLinesToNodes(decoded);
+    }
+    // 双重 Base64 兜底
+    const doubleDecoded = safeB64Decode(decoded);
+    if (doubleDecoded && /^(vmess|vless|trojan|ss|ssr|socks5|https?):\/\//im.test(doubleDecoded)) {
+      return parseLinesToNodes(doubleDecoded);
+    }
+  }
+
+  // 4. 所有尝试都失败，按原文逐行解析（兜底）
+  return parseLinesToNodes(text);
+}
+
+function parseLinesToNodes(text) {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const nodes = [];
   for (const line of lines) {

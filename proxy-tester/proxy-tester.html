@@ -764,9 +764,22 @@ let nodeIdCounter = 0;  // 节点 ID 自增
 // 安全 Base64 解码（兼容 URL-safe 与缺失 padding）
 function safeB64Decode(str) {
   try {
+    if (!str || typeof str !== 'string') return null;
+    // 去除 BOM、零宽字符、不可见控制字符
+    str = str.replace(/[\uFEFF\u200B\u200C\u200D\u00A0\u2028\u2029]/g, '');
     str = str.trim().replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+    // 去除尾部多余等号后重新补齐
+    str = str.replace(/=+$/, '');
     while (str.length % 4) str += '=';
-    return decodeURIComponent(escape(atob(str)));
+    // 验证是否为合法 Base64 字符
+    if (!/^[A-Za-z0-9+/]+=*$/.test(str)) return null;
+    const binary = atob(str);
+    try {
+      return decodeURIComponent(escape(binary));
+    } catch (e2) {
+      // UTF-8 解码失败，返回原始字符串（兼容纯 ASCII）
+      return binary;
+    }
   } catch (e) {
     return null;
   }
@@ -1046,12 +1059,11 @@ function parseNodeLink(uri) {
   if (/^vmess:\/\//i.test(uri)) return parseVmess(uri);
   if (/^vless:\/\//i.test(uri)) return parseVless(uri);
   if (/^trojan:\/\//i.test(uri)) return parseTrojan(uri);
-  if (/^ss:\/\//i.test(uri)) return parseSS(uri);
+  if (/^ss:\/\//i.test(uri)) return parseShadowsocks(uri);
   if (/^ssr:\/\//i.test(uri)) return parseSSR(uri);
   if (/^socks5?:\/\//i.test(uri)) return parseGeneric(uri, 'socks5');
-  if (/^https?:\/\//i.test(uri) && !uri.includes('://') === false) {
-    // 仅当明显是代理 http 节点时
-    return parseGeneric(uri, uri.startsWith('https://') ? 'https' : 'http');
+  if (/^https?:\/\//i.test(uri)) {
+    return parseGeneric(uri, /^https:\/\//i.test(uri) ? 'https' : 'http');
   }
   return null;
 }
@@ -1358,7 +1370,8 @@ async function importSubscription() {
 
 // 解析订阅内容（兼容 Base64 / 明文 / Clash YAML）
 function parseSubscriptionContent(text) {
-  text = text.trim();
+  // 去除 BOM、零宽字符等不可见字符
+  text = text.replace(/^[\uFEFF\u200B\u200C\u200D\u00A0]+/, '').trim();
 
   // 1. Clash YAML 优先检测
   if (text.includes('proxies:') && text.includes('- name:')) {
@@ -1370,7 +1383,7 @@ function parseSubscriptionContent(text) {
     return parseLinesToNodes(text);
   }
 
-  // 3. 否则无条件尝试 Base64 解码
+  // 3. 尝试 Base64 解码
   const decoded = safeB64Decode(text);
   if (decoded) {
     if (/^(vmess|vless|trojan|ss|ssr|socks5|https?):\/\//im.test(decoded)) {
@@ -1383,14 +1396,25 @@ function parseSubscriptionContent(text) {
     }
   }
 
-  // 4. 所有尝试都失败，按原文逐行解析（兜底）
+  // 4. 尝试去除所有非 Base64 字符后重新解码（处理混入的换行、空格、特殊字符）
+  const cleaned = text.replace(/[^A-Za-z0-9+/=_-]/g, '');
+  if (cleaned.length > 20 && cleaned !== text) {
+    const retryDecoded = safeB64Decode(cleaned);
+    if (retryDecoded && /^(vmess|vless|trojan|ss|ssr|socks5|https?):\/\//im.test(retryDecoded)) {
+      return parseLinesToNodes(retryDecoded);
+    }
+  }
+
+  // 5. 所有尝试都失败，按原文逐行解析（兜底）
   return parseLinesToNodes(text);
 }
 
 function parseLinesToNodes(text) {
-  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const lines = text.split(/\r?\n/).map(l => l.replace(/[\uFEFF\u200B\u200C\u200D\u00A0]/g, '').trim()).filter(Boolean);
   const nodes = [];
   for (const line of lines) {
+    // 跳过明显不是节点链接的行
+    if (!/^(vmess|vless|trojan|ss|ssr|socks5|https?):\/\//i.test(line)) continue;
     const node = parseNodeLink(line);
     if (node) nodes.push(node);
   }
